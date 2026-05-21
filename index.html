@@ -35,7 +35,7 @@
           Lower equation g(x)
           <input id="lowerEquation" type="text" value="" spellcheck="false">
         </label>
-        <p class="hint">Supports algebraic input like 2x+1, x³, sqrt(x), cbrt(x), |x|, e^x, ln(x), log(x), log10(x), trig, inverse trig, and rational expressions.</p>
+        <p class="hint">Supports 2x+1, y=2x+1, f=2x, f(x)=2x, x³, sqrt(x), cbrt(x), |x|, e^x, ln(x), log(x), log10(x), trig, inverse trig, and rational expressions.</p>
       </section>
 
       <section>
@@ -118,7 +118,10 @@
       <div class="panel solid-panel">
         <div class="panel-title">
           <h2>Cross Sections And Solid</h2>
-          <span id="shapeSummary"></span>
+          <div class="graph-title-tools">
+            <span id="shapeSummary"></span>
+            <button id="solidHome" class="panel-tool-button" type="button" aria-label="Reset 3D solid view">Home</button>
+          </div>
         </div>
         <canvas id="solidCanvas" width="1100" height="620" aria-label="3D solid approximation"></canvas>
       </div>
