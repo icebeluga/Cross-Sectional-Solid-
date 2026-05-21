@@ -29,7 +29,8 @@ const els = {
   exportPng: document.getElementById("exportPng"),
   zoomIn: document.getElementById("zoomIn"),
   zoomOut: document.getElementById("zoomOut"),
-  zoomReset: document.getElementById("zoomReset")
+  zoomReset: document.getElementById("zoomReset"),
+  solidHome: document.getElementById("solidHome")
 };
 
 let lastState = null;
@@ -45,6 +46,7 @@ const solidView = {
   panY: 0,
   zoom: 1
 };
+const solidHomeView = { ...solidView };
 
 function formulaIsDigit(c) {
   return c >= "0" && c <= "9";
@@ -68,7 +70,10 @@ function formulaNormalizeEquation(equation) {
 
   if (equalsIndex >= 0) {
     if (compact.indexOf("=", equalsIndex + 1) >= 0) throw new Error("Only one equals sign is supported.");
-    if (equalsIndex !== 1 || compact.substring(0, 1) !== "y") throw new Error("Only equations of the form y = f(x) are supported.");
+    const leftSide = compact.substring(0, equalsIndex).toLowerCase();
+    if (!["y", "f", "g", "f(x)", "g(x)", "y(x)"].includes(leftSide)) {
+      throw new Error("Use a bare expression like 2x, or an equation like y = 2x, f = 2x, or f(x) = 2x.");
+    }
     compact = compact.substring(equalsIndex + 1);
   }
 
@@ -418,7 +423,10 @@ function normalizeAlgebraEquation(equation) {
   const equalsIndex = compact.indexOf("=");
   if (equalsIndex >= 0) {
     if (compact.indexOf("=", equalsIndex + 1) >= 0) throw new Error("Only one equals sign is supported.");
-    if (compact.slice(0, equalsIndex).toLowerCase() !== "y") throw new Error("Only equations of the form y = f(x) are supported.");
+    const leftSide = compact.slice(0, equalsIndex).toLowerCase();
+    if (!["y", "f", "g", "f(x)", "g(x)", "y(x)"].includes(leftSide)) {
+      throw new Error("Use a bare expression like 2x, or an equation like y = 2x, f = 2x, or f(x) = 2x.");
+    }
     compact = compact.slice(equalsIndex + 1);
   }
   if (!compact) throw new Error("Formula is empty.");
@@ -1194,6 +1202,15 @@ function resetGraphZoom() {
   drawRegion(lastState);
 }
 
+function resetSolidView() {
+  solidView.rotX = solidHomeView.rotX;
+  solidView.rotY = solidHomeView.rotY;
+  solidView.panX = solidHomeView.panX;
+  solidView.panY = solidHomeView.panY;
+  solidView.zoom = solidHomeView.zoom;
+  if (lastState) drawSolid(lastState);
+}
+
 function panGraphByPixels(dx, dy, rect) {
   if (!lastState || !graphViewport) return;
   const plot = graphPlotRect(rect.width, rect.height);
@@ -1662,6 +1679,7 @@ els.exportPng.addEventListener("click", exportPng);
 els.zoomIn.addEventListener("click", () => zoomGraph(0.72));
 els.zoomOut.addEventListener("click", () => zoomGraph(1.38));
 els.zoomReset.addEventListener("click", resetGraphZoom);
+els.solidHome.addEventListener("click", resetSolidView);
 els.regionSvg.addEventListener("wheel", (event) => {
   if (!lastState || !graphViewport) return;
   event.preventDefault();
