@@ -243,6 +243,22 @@ button:hover {
   filter: none;
 }
 
+.panel-tool-button {
+  min-height: 30px;
+  width: auto;
+  padding: 0 12px;
+  border-color: #cfd5da;
+  background: #ffffff;
+  color: #374151;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.panel-tool-button:hover {
+  background: #f3f4f6;
+  filter: none;
+}
+
 #regionSvg,
 #solidCanvas {
   display: block;
