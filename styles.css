@@ -5,9 +5,10 @@
   --muted: #627066;
   --line: #d7ddd2;
   --panel: #ffffff;
-  --accent: #276b5d;
+  --accent: #0284c7;
   --accent-2: #b6502f;
-  --accent-3: #2f5f9f;
+  --accent-3: #0ea5e9;
+  --accent-rgb: 2, 132, 199;
   --warn: #9f332f;
   --shadow: 0 18px 40px rgba(22, 32, 26, 0.11);
 }
@@ -73,6 +74,94 @@ h2 {
   background: #fff5f2;
 }
 
+.tab-strip {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(246, 247, 243, 0.94);
+  backdrop-filter: blur(8px);
+}
+
+.tabs-list {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.function-tab {
+  width: auto;
+  max-width: 240px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-color: var(--line);
+  background: #ffffff;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.function-tab.active {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  background: rgba(var(--accent-rgb), 0.09);
+  color: var(--accent);
+}
+
+.add-tab-button {
+  width: auto;
+  min-height: 36px;
+  padding: 0 12px;
+  flex: 0 0 auto;
+}
+
+.tab-preview {
+  position: fixed;
+  z-index: 30;
+  width: min(330px, calc(100vw - 36px));
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 40px rgba(22, 32, 26, 0.18);
+  color: var(--ink);
+  pointer-events: none;
+}
+
+.tab-preview h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.tab-preview p {
+  margin: 6px 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.tab-preview svg {
+  display: block;
+  width: 100%;
+  height: 120px;
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fbfcfa;
+}
+
+.tab-preview .preview-math {
+  color: var(--ink);
+  font-size: 12px;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(290px, 360px) minmax(0, 1fr);
@@ -124,16 +213,73 @@ select {
   padding: 9px 10px;
 }
 
+.equation-entry {
+  display: grid;
+  grid-template-columns: 62px 1fr;
+  align-items: center;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fbfcfa;
+  overflow: hidden;
+}
+
+.equation-prefix {
+  display: grid;
+  place-items: center;
+  min-height: 40px;
+  border-right: 1px solid var(--line);
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 900;
+  padding: 0 8px;
+}
+
+.equation-entry input {
+  min-height: 40px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.equation-entry input:focus {
+  outline: none;
+}
+
+.equation-entry:focus-within {
+  outline: 2px solid rgba(var(--accent-rgb), 0.25);
+  outline-offset: 2px;
+}
+
 input:focus,
 select:focus,
 button:focus {
-  outline: 2px solid rgba(39, 107, 93, 0.25);
+  outline: 2px solid rgba(var(--accent-rgb), 0.25);
   outline-offset: 2px;
 }
 
 input.input-error {
   border-color: rgba(159, 51, 47, 0.75);
   background: #fff7f4;
+}
+
+.equation-entry:has(input.input-error) {
+  border-color: rgba(159, 51, 47, 0.75);
+  background: #fff7f4;
+}
+
+.mode-toggle {
+  margin-top: 12px;
+  min-height: 40px;
+  background: #ffffff;
+  color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.35);
+}
+
+.mode-toggle:hover {
+  background: rgba(var(--accent-rgb), 0.07);
+  filter: none;
 }
 
 button {
