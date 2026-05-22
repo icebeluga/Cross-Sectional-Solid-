@@ -6,6 +6,13 @@ const ZERO_SIZE_TOLERANCE = 1e-7;
 const els = {
   upperEquation: document.getElementById("upperEquation"),
   lowerEquation: document.getElementById("lowerEquation"),
+  orientationToggle: document.getElementById("orientationToggle"),
+  upperEquationPrefix: document.getElementById("upperEquationPrefix"),
+  lowerEquationPrefix: document.getElementById("lowerEquationPrefix"),
+  upperFunctionLabel: document.getElementById("upperFunctionLabel"),
+  lowerFunctionLabel: document.getElementById("lowerFunctionLabel"),
+  minValueLabel: document.getElementById("minValueLabel"),
+  maxValueLabel: document.getElementById("maxValueLabel"),
   crossSectionShape: document.getElementById("crossSectionShape"),
   rectangleWidth: document.getElementById("rectangleWidth"),
   trapezoidK: document.getElementById("trapezoidK"),
@@ -30,7 +37,10 @@ const els = {
   zoomIn: document.getElementById("zoomIn"),
   zoomOut: document.getElementById("zoomOut"),
   zoomReset: document.getElementById("zoomReset"),
-  solidHome: document.getElementById("solidHome")
+  solidHome: document.getElementById("solidHome"),
+  tabsList: document.getElementById("tabsList"),
+  addTabButton: document.getElementById("addTabButton"),
+  tabPreview: document.getElementById("tabPreview")
 };
 
 let lastState = null;
@@ -39,12 +49,17 @@ let graphBaseViewport = null;
 let previousGraphKey = "";
 let graphDrag = null;
 let solidDrag = null;
+let applyingTabSettings = false;
+let activeTabId = "tab-1";
+let tabCounter = 1;
+let functionTabs = [];
+let equationOrientation = "y";
 const solidView = {
   rotX: -0.46,
   rotY: 0.72,
   panX: 0,
   panY: 0,
-  zoom: 1
+  zoom: 1.45
 };
 const solidHomeView = { ...solidView };
 
@@ -71,8 +86,8 @@ function formulaNormalizeEquation(equation) {
   if (equalsIndex >= 0) {
     if (compact.indexOf("=", equalsIndex + 1) >= 0) throw new Error("Only one equals sign is supported.");
     const leftSide = compact.substring(0, equalsIndex).toLowerCase();
-    if (!["y", "f", "g", "f(x)", "g(x)", "y(x)"].includes(leftSide)) {
-      throw new Error("Use a bare expression like 2x, or an equation like y = 2x, f = 2x, or f(x) = 2x.");
+    if (!["x", "y", "f", "g", "f(x)", "g(x)", "y(x)", "x(y)"].includes(leftSide)) {
+      throw new Error("Use a bare expression like 2x, or choose x= or y= and enter only the expression.");
     }
     compact = compact.substring(equalsIndex + 1);
   }
@@ -111,7 +126,7 @@ function formulaTokenize(expression) {
       continue;
     }
 
-    if (c === "x") {
+    if (c === "x" || c === "y") {
       tokens.push({ kind: "X", value: "x" });
       i += 1;
       continue;
@@ -126,7 +141,7 @@ function formulaTokenize(expression) {
       if (name === "pi") tokens.push({ kind: "NUMBER", value: Math.PI });
       else if (name === "e") tokens.push({ kind: "NUMBER", value: FORMULA_E_CONSTANT });
       else if (formulaIsFunctionName(name)) tokens.push({ kind: "FUNC", value: name });
-      else throw new Error(`Unsupported function or name: ${name}. Supported names are x, pi, e, sin, cos, tan, sqrt, abs, arcsin, arccos, arctan, log, and ln.`);
+      else throw new Error(`Unsupported function or name: ${name}. Supported names are x, y, pi, e, sin, cos, tan, sqrt, abs, arcsin, arccos, arctan, log, and ln.`);
       continue;
     }
 
@@ -424,8 +439,8 @@ function normalizeAlgebraEquation(equation) {
   if (equalsIndex >= 0) {
     if (compact.indexOf("=", equalsIndex + 1) >= 0) throw new Error("Only one equals sign is supported.");
     const leftSide = compact.slice(0, equalsIndex).toLowerCase();
-    if (!["y", "f", "g", "f(x)", "g(x)", "y(x)"].includes(leftSide)) {
-      throw new Error("Use a bare expression like 2x, or an equation like y = 2x, f = 2x, or f(x) = 2x.");
+    if (!["x", "y", "f", "g", "f(x)", "g(x)", "y(x)", "x(y)"].includes(leftSide)) {
+      throw new Error("Use a bare expression like 2x, or choose x= or y= and enter only the expression.");
     }
     compact = compact.slice(equalsIndex + 1);
   }
@@ -492,10 +507,44 @@ function buildMathExpression(equation, field) {
   }
 }
 
+function replaceVariableForDisplay(text, fromVariable, toVariable) {
+  return text.replace(new RegExp(`\\b${fromVariable}\\b`, "g"), toVariable);
+}
+
+function adaptExpressionVariable(expression, orientation) {
+  if (orientation === "y") return expression;
+  const normalized = replaceVariableForDisplay(expression.normalized, "x", "y");
+  const display = replaceVariableForDisplay(expression.display, "x", "y");
+  return {
+    ...expression,
+    normalized,
+    display,
+    evaluate(y) {
+      try {
+        if (expression.engine === "mathjs") {
+          const value = expression.node.compile().evaluate({ x: y, y, pi: Math.PI, e: Math.E });
+          if (typeof value !== "number" || !Number.isFinite(value)) return formulaFail("value is not real-valued at this y-value");
+          return formulaOk(value);
+        }
+        return expression.evaluate(y);
+      } catch (error) {
+        return formulaFail(error.message || "cannot evaluate this y-value");
+      }
+    },
+    toTex() {
+      return replaceVariableForDisplay(expression.toTex(), "x", "y");
+    }
+  };
+}
+
 function getSettings() {
+  const orientation = equationOrientation;
   return {
     upperEquation: els.upperEquation.value,
     lowerEquation: els.lowerEquation.value,
+    orientation,
+    upperOrientation: orientation,
+    lowerOrientation: orientation,
     crossSectionShape: els.crossSectionShape.value,
     rectangleWidth: Number(els.rectangleWidth.value),
     trapezoidK: Number(els.trapezoidK.value),
@@ -507,9 +556,73 @@ function getSettings() {
   };
 }
 
+function settingsFromDom() {
+  const orientation = equationOrientation;
+  return {
+    upperEquation: els.upperEquation.value,
+    lowerEquation: els.lowerEquation.value,
+    orientation,
+    upperOrientation: orientation,
+    lowerOrientation: orientation,
+    crossSectionShape: els.crossSectionShape.value,
+    rectangleWidth: els.rectangleWidth.value,
+    trapezoidK: els.trapezoidK.value,
+    xMin: els.xMin.value,
+    xMax: els.xMax.value,
+    sliceCount: els.sliceCount.value,
+    scaleFactor: els.scaleFactor.value,
+    alternateSlices: els.alternateSlices.checked
+  };
+}
+
+function applySettingsToDom(settings) {
+  applyingTabSettings = true;
+  equationOrientation = settings.orientation ?? settings.upperOrientation ?? "y";
+  els.upperEquation.value = settings.upperEquation ?? "";
+  els.lowerEquation.value = settings.lowerEquation ?? "";
+  els.crossSectionShape.value = settings.crossSectionShape ?? "CIRCLE";
+  els.rectangleWidth.value = settings.rectangleWidth ?? "0.5";
+  els.trapezoidK.value = settings.trapezoidK ?? "1";
+  els.xMin.value = settings.xMin ?? "";
+  els.xMax.value = settings.xMax ?? "";
+  els.sliceCount.value = settings.sliceCount ?? "100";
+  els.scaleFactor.value = settings.scaleFactor ?? "1";
+  els.alternateSlices.checked = Boolean(settings.alternateSlices);
+  applyingTabSettings = false;
+}
+
+function defaultTabSettings() {
+  return {
+    upperEquation: "",
+    lowerEquation: "",
+    orientation: "y",
+    upperOrientation: "y",
+    lowerOrientation: "y",
+    crossSectionShape: "CIRCLE",
+    rectangleWidth: "0.5",
+    trapezoidK: "1",
+    xMin: "",
+    xMax: "",
+    sliceCount: "100",
+    scaleFactor: "1",
+    alternateSlices: false
+  };
+}
+
+function currentTab() {
+  return functionTabs.find((tab) => tab.id === activeTabId);
+}
+
+function saveActiveTabSettings() {
+  const tab = currentTab();
+  if (!tab) return;
+  tab.settings = settingsFromDom();
+}
+
 function validateBounds(s) {
-  if (els.xMin.value.trim() === "") throw new Error("Minimum x-value is required.");
-  if (els.xMax.value.trim() === "") throw new Error("Maximum x-value is required.");
+  const variable = s.upperOrientation === "x" ? "y" : "x";
+  if (els.xMin.value.trim() === "") throw new Error(`Minimum ${variable}-value is required.`);
+  if (els.xMax.value.trim() === "") throw new Error(`Maximum ${variable}-value is required.`);
   if (els.upperEquation.value.trim() === "") {
     const error = new Error("Upper equation f(x) is required.");
     error.field = "upper";
@@ -522,7 +635,7 @@ function validateBounds(s) {
     error.examples = "Examples: 0, x, -sqrt(1 - x^2), x^2 - 1.";
     throw error;
   }
-  if (s.xMax <= s.xMin) throw new Error("Maximum x-value must be greater than minimum x-value.");
+  if (s.xMax <= s.xMin) throw new Error(`Maximum ${variable}-value must be greater than minimum ${variable}-value.`);
   if (s.sliceCount < 2) throw new Error("Number of slices must be at least 2.");
   if (s.sliceCount > 250) throw new Error("Number of slices cannot exceed 250.");
   if (s.scaleFactor <= 0) throw new Error("scaleFactor must be greater than 0.");
@@ -541,8 +654,13 @@ function modelAreaForDistance(distance, s) {
 function computeState() {
   const settings = getSettings();
   validateBounds(settings);
-  const upperExpression = buildMathExpression(settings.upperEquation, "upper");
-  const lowerExpression = buildMathExpression(settings.lowerEquation, "lower");
+  if (settings.upperOrientation !== settings.lowerOrientation) {
+    throw new Error("Both functions must use the same orientation for one solid: choose y= for both, or x= for both.");
+  }
+  const sweepVariable = settings.upperOrientation === "x" ? "y" : "x";
+  const dependentVariable = settings.upperOrientation === "x" ? "x" : "y";
+  const upperExpression = adaptExpressionVariable(buildMathExpression(settings.upperEquation, "upper"), settings.upperOrientation);
+  const lowerExpression = adaptExpressionVariable(buildMathExpression(settings.lowerEquation, "lower"), settings.lowerOrientation);
   const denominator = settings.sliceCount - 1;
   const graphUnitLength = settings.scaleFactor;
   const sliceSpacing = ((settings.xMax - settings.xMin) / denominator) * graphUnitLength;
@@ -552,37 +670,46 @@ function computeState() {
 
   for (let i = 0; i < settings.sliceCount; i += 1) {
     const t = i / denominator;
-    const x = settings.xMin + t * (settings.xMax - settings.xMin);
+    const sweep = settings.xMin + t * (settings.xMax - settings.xMin);
     if (settings.alternateSlices && i % 2 === 1) {
-      skipped.push({ index: i, x, reason: "alternate slice skipped" });
+      skipped.push({ index: i, x: sweep, reason: "alternate slice skipped" });
       continue;
     }
 
-    const upperResult = upperExpression.evaluate(x);
-    const lowerResult = lowerExpression.evaluate(x);
+    const upperResult = upperExpression.evaluate(sweep);
+    const lowerResult = lowerExpression.evaluate(sweep);
     if (!upperResult.ok || !lowerResult.ok) {
-      skipped.push({ index: i, x, reason: upperResult.ok ? lowerResult.reason : upperResult.reason });
+      skipped.push({ index: i, x: sweep, reason: upperResult.ok ? lowerResult.reason : upperResult.reason });
       continue;
     }
 
-    const upperY = upperResult.value;
-    const lowerY = lowerResult.value;
-    const distance = upperY - lowerY;
-    if (distance < -ZERO_SIZE_TOLERANCE) throw new Error(`Upper equation is below lower equation at x = ${formatNumber(x)}.`);
-    const midY = (upperY + lowerY) / 2;
+    const upperValue = upperResult.value;
+    const lowerValue = lowerResult.value;
+    const distance = upperValue - lowerValue;
+    if (distance < -ZERO_SIZE_TOLERANCE) throw new Error(`Upper equation is below lower equation at ${sweepVariable} = ${formatNumber(sweep)}.`);
+    const midValue = (upperValue + lowerValue) / 2;
     const area = Math.abs(distance) <= ZERO_SIZE_TOLERANCE ? 0 : modelAreaForDistance(distance, settings);
+    const graphX = settings.upperOrientation === "x" ? midValue : sweep;
+    const graphY = settings.upperOrientation === "x" ? sweep : midValue;
+    const upperPoint = settings.upperOrientation === "x" ? { x: upperValue, y: sweep } : { x: sweep, y: upperValue };
+    const lowerPoint = settings.upperOrientation === "x" ? { x: lowerValue, y: sweep } : { x: sweep, y: lowerValue };
 
     samples.push({
       index: i,
-      x,
+      x: sweep,
+      sweep,
       t,
-      upperY,
-      lowerY,
+      upperY: upperValue,
+      lowerY: lowerValue,
+      upperPoint,
+      lowerPoint,
       distance,
-      midY,
+      midY: midValue,
+      graphX,
+      graphY,
       area,
-      modelX: x * graphUnitLength,
-      modelMidY: midY * graphUnitLength,
+      modelX: graphX * graphUnitLength,
+      modelMidY: graphY * graphUnitLength,
       modelDistance: distance * graphUnitLength
     });
   }
@@ -600,6 +727,8 @@ function computeState() {
     lowerExpression,
     upperAst: upperExpression.ast,
     lowerAst: lowerExpression.ast,
+    sweepVariable,
+    dependentVariable,
     sliceSpacing,
     alternateSliceHalfThickness,
     graphUnitLength,
@@ -979,32 +1108,307 @@ function exactValueTex(value, state, baseIntegral) {
   return { exact: coefficientToTex(coefficient, { piFactor: true }), approx: formatNumber(value, 8) };
 }
 
+function algebriteReady() {
+  return typeof window.Algebrite !== "undefined" && typeof window.Algebrite.run === "function";
+}
+
+function algebriteExpr(text) {
+  return text
+    .replace(/\bnthRoot\(([^,]+),3\)/g, "($1)^(1/3)")
+    .replace(/\blog10\(/g, "log10(")
+    .replace(/\basin\(/g, "arcsin(")
+    .replace(/\bacos\(/g, "arccos(")
+    .replace(/\batan\(/g, "arctan(");
+}
+
+function algebriteRun(command) {
+  return String(window.Algebrite.run(command)).trim();
+}
+
+function algebriteNumeric(expression) {
+  const candidates = [];
+  try {
+    candidates.push(algebriteRun(`float(${expression})`));
+  } catch (error) {
+    candidates.push(expression);
+  }
+  candidates.push(expression);
+
+  for (const candidate of candidates) {
+    const direct = Number(candidate);
+    if (Number.isFinite(direct)) return direct;
+    const jsExpression = candidate.replace(/\bpi\b/gi, `(${Math.PI})`).replace(/\^/g, "**");
+    if (/^[0-9+\-*/().\sEe]+$/.test(jsExpression)) {
+      try {
+        const value = Function(`"use strict"; return (${jsExpression});`)();
+        if (Number.isFinite(value)) return value;
+      } catch (error) {
+        // Try the next candidate.
+      }
+    }
+  }
+
+  return NaN;
+}
+
+function algebriteLatex(expression) {
+  try {
+    return algebriteRun(`printlatex(${expression})`);
+  } catch (error) {
+    return expression.replace(/\*/g, " ");
+  }
+}
+
+function algebriteMultiplier(s) {
+  const scale = formatNumber(s.scaleFactor, 12);
+  if (s.crossSectionShape === "SEMICIRCLE") return `(pi/8)*(${scale})^3`;
+  if (s.crossSectionShape === "CIRCLE") return `(pi/4)*(${scale})^3`;
+  if (s.crossSectionShape === "RECTANGLE") return `(${formatNumber(s.rectangleWidth, 12)})*(${scale})^2`;
+  return `(3/2)*(${formatNumber(s.trapezoidK, 12)})*(${scale})^3`;
+}
+
+function algebriteExactVolumeEntries(state) {
+  if (!algebriteReady()) return null;
+  try {
+    const s = state.settings;
+    const v = state.sweepVariable;
+    const upper = algebriteExpr(state.upperExpression.normalized);
+    const lower = algebriteExpr(state.lowerExpression.normalized);
+    const bExpr = algebriteRun(`simplify((${upper})-(${lower}))`);
+    const baseExpr = s.crossSectionShape === "RECTANGLE" ? bExpr : algebriteRun(`simplify((${bExpr})^2)`);
+    const areaExpr = algebriteRun(`simplify((${algebriteMultiplier(s)})*(${baseExpr}))`);
+    const antiderivative = algebriteRun(`integral(${areaExpr},${v})`);
+    const upperValue = algebriteRun(`subst(${formatNumber(s.xMax, 12)},${v},${antiderivative})`);
+    const lowerValue = algebriteRun(`subst(${formatNumber(s.xMin, 12)},${v},${antiderivative})`);
+    const exactVolume = algebriteRun(`simplify((${upperValue})-(${lowerValue}))`);
+    const approx = algebriteNumeric(exactVolume);
+    return [
+      { tex: `b(${v}) = ${algebriteLatex(bExpr)}` },
+      { tex: `${s.crossSectionShape === "RECTANGLE" ? `b(${v})` : `b(${v})^2`} = ${algebriteLatex(baseExpr)}` },
+      { tex: `A(${v}) = ${algebriteLatex(areaExpr)}` },
+      { tex: `V = \\int_{${formatNumber(s.xMin)}}^{${formatNumber(s.xMax)}} ${algebriteLatex(areaExpr)}\\,d${v}` },
+      { tex: `V = \\left[${algebriteLatex(antiderivative)}\\right]_{${formatNumber(s.xMin)}}^{${formatNumber(s.xMax)}}` },
+      { tex: `V = ${algebriteLatex(exactVolume)}\\text{ cubic inches}` },
+      { tex: `V \\approx ${formatNumber(approx, 8)}\\text{ cubic inches}` },
+      { type: "note", text: "Exact work simplified with Algebrite CAS." }
+    ];
+  } catch (error) {
+    return null;
+  }
+}
+
 function setupMathEntries(state) {
   const s = state.settings;
-  const upperSym = state.upperExpression.toSym();
-  const lowerSym = state.lowerExpression.toSym();
-  const rawB = symSimplify(sym("-", { left: upperSym, right: lowerSym }));
-  const simplifiedB = symSimplify(rawB);
+  const v = state.sweepVariable;
   const entries = [
-    { tex: `b(x) = ${state.upperExpression.toTex()} - \\left(${state.lowerExpression.toTex()}\\right)` }
+    { tex: `b(${v}) = ${state.upperExpression.toTex()} - \\left(${state.lowerExpression.toTex()}\\right)` }
   ];
-  if (symToTex(simplifiedB) !== `${state.upperExpression.toTex()} - \\left(${state.lowerExpression.toTex()}\\right)`) {
-    entries.push({ tex: `b(x) = ${symToTex(simplifiedB)}` });
+  if (v === "x") {
+    const upperSym = state.upperExpression.toSym();
+    const lowerSym = state.lowerExpression.toSym();
+    const rawB = symSimplify(sym("-", { left: upperSym, right: lowerSym }));
+    const simplifiedB = symSimplify(rawB);
+    if (symToTex(simplifiedB) !== `${state.upperExpression.toTex()} - \\left(${state.lowerExpression.toTex()}\\right)`) {
+      entries.push({ tex: `b(${v}) = ${symToTex(simplifiedB)}` });
+    }
   }
-  entries.push({ tex: areaFormulaTex(s) });
-  entries.push({ tex: `V = \\int_{${formatNumber(s.xMin)}}^{${formatNumber(s.xMax)}} A(x)\\,dx` });
+  entries.push({ tex: areaFormulaTex(s, v) });
+  entries.push({ tex: `V = \\int_{${formatNumber(s.xMin)}}^{${formatNumber(s.xMax)}} A(${v})\\,d${v}` });
   entries.push({ tex: `\\text{Model scale: }1\\text{ graph unit }= ${formatNumber(s.scaleFactor)}\\text{ inch}` });
   return entries;
 }
 
-function areaFormulaTex(s) {
-  if (s.crossSectionShape === "SEMICIRCLE") return `A(x) = \\frac{\\pi}{8}\\left[f(x)-g(x)\\right]^2`;
-  if (s.crossSectionShape === "CIRCLE") return `A(x) = \\frac{\\pi}{4}\\left[f(x)-g(x)\\right]^2`;
-  if (s.crossSectionShape === "RECTANGLE") return `A(x) = ${coefficientToTex(s.rectangleWidth)}\\left[f(x)-g(x)\\right]`;
-  return `A(x) = \\frac{3}{2}\\,${coefficientToTex(s.trapezoidK)}\\left[f(x)-g(x)\\right]^2`;
+function areaFormulaTex(s, variable = "x") {
+  if (s.crossSectionShape === "SEMICIRCLE") return `A(${variable}) = \\frac{\\pi}{8}\\left[f(${variable})-g(${variable})\\right]^2`;
+  if (s.crossSectionShape === "CIRCLE") return `A(${variable}) = \\frac{\\pi}{4}\\left[f(${variable})-g(${variable})\\right]^2`;
+  if (s.crossSectionShape === "RECTANGLE") return `A(${variable}) = ${coefficientToTex(s.rectangleWidth)}\\left[f(${variable})-g(${variable})\\right]`;
+  return `A(${variable}) = \\frac{3}{2}\\,${coefficientToTex(s.trapezoidK)}\\left[f(${variable})-g(${variable})\\right]^2`;
+}
+
+function tabTitle(tab, index) {
+  const settings = tab.settings;
+  const upper = settings.upperEquation?.trim();
+  const lower = settings.lowerEquation?.trim();
+  if (upper || lower) {
+    const orientation = settings.orientation ?? settings.upperOrientation ?? "y";
+    const variable = orientation === "x" ? "y" : "x";
+    return `${orientation} = ${upper || "?"} / ${lower || "?"} (${variable})`;
+  }
+  return `Setup ${index + 1}`;
+}
+
+function renderTabs() {
+  els.tabsList.innerHTML = "";
+  functionTabs.forEach((tab, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `function-tab${tab.id === activeTabId ? " active" : ""}`;
+    button.textContent = tabTitle(tab, index);
+    button.setAttribute("aria-current", tab.id === activeTabId ? "page" : "false");
+    button.addEventListener("click", () => switchToTab(tab.id));
+    button.addEventListener("mouseenter", (event) => showTabPreview(tab, event.currentTarget));
+    button.addEventListener("mousemove", (event) => positionTabPreview(event.currentTarget));
+    button.addEventListener("mouseleave", hideTabPreview);
+    els.tabsList.append(button);
+  });
+}
+
+function switchToTab(tabId) {
+  if (tabId === activeTabId) return;
+  saveActiveTabSettings();
+  activeTabId = tabId;
+  const tab = currentTab();
+  if (!tab) return;
+  applySettingsToDom(tab.settings);
+  graphViewport = null;
+  graphBaseViewport = null;
+  previousGraphKey = "";
+  renderTabs();
+  render();
+}
+
+function addFunctionTab() {
+  saveActiveTabSettings();
+  tabCounter += 1;
+  const tab = {
+    id: `tab-${tabCounter}`,
+    settings: defaultTabSettings()
+  };
+  functionTabs.push(tab);
+  activeTabId = tab.id;
+  applySettingsToDom(tab.settings);
+  graphViewport = null;
+  graphBaseViewport = null;
+  previousGraphKey = "";
+  renderTabs();
+  render();
+}
+
+function tabSettingsAsNumbers(settings) {
+  return {
+    ...settings,
+    rectangleWidth: Number(settings.rectangleWidth),
+    trapezoidK: Number(settings.trapezoidK),
+    xMin: Number(settings.xMin),
+    xMax: Number(settings.xMax),
+    sliceCount: Math.round(Number(settings.sliceCount)),
+    scaleFactor: Number(settings.scaleFactor),
+    alternateSlices: Boolean(settings.alternateSlices)
+  };
+}
+
+function previewSectionSvg(shape, distance, settings) {
+  const safeDistance = Math.max(Math.abs(distance), 0.001);
+  const width = 290;
+  const height = 120;
+  const cx = width / 2;
+  const floorY = 92;
+  const scale = Math.min(50 / safeDistance, 28);
+  const r = safeDistance * scale / 2;
+  const depth = Math.max(10, Math.min(44, (settings.rectangleWidth || 1) * scale));
+  const trapezoidHeight = Math.max(14, Math.min(52, (settings.trapezoidK || 1) * safeDistance * scale));
+  const stroke = "#0284c7";
+  const fill = "rgba(2, 132, 199, 0.15)";
+
+  if (shape === "SEMICIRCLE") {
+    return `<svg viewBox="0 0 ${width} ${height}" aria-label="Semicircle cross-section preview">
+      <line x1="18" y1="${floorY}" x2="${width - 18}" y2="${floorY}" stroke="#d7ddd2"/>
+      <path d="M ${cx - r} ${floorY} A ${r} ${r} 0 0 1 ${cx + r} ${floorY} L ${cx - r} ${floorY} Z" fill="${fill}" stroke="${stroke}" stroke-width="2"/>
+    </svg>`;
+  }
+  if (shape === "CIRCLE") {
+    return `<svg viewBox="0 0 ${width} ${height}" aria-label="Circle cross-section preview">
+      <line x1="18" y1="${floorY}" x2="${width - 18}" y2="${floorY}" stroke="#d7ddd2"/>
+      <circle cx="${cx}" cy="${floorY - r}" r="${r}" fill="${fill}" stroke="${stroke}" stroke-width="2"/>
+    </svg>`;
+  }
+  if (shape === "RECTANGLE") {
+    return `<svg viewBox="0 0 ${width} ${height}" aria-label="Rectangle cross-section preview">
+      <line x1="18" y1="${floorY}" x2="${width - 18}" y2="${floorY}" stroke="#d7ddd2"/>
+      <rect x="${cx - r}" y="${floorY - depth}" width="${2 * r}" height="${depth}" fill="${fill}" stroke="${stroke}" stroke-width="2"/>
+    </svg>`;
+  }
+  return `<svg viewBox="0 0 ${width} ${height}" aria-label="Trapezoid cross-section preview">
+    <line x1="18" y1="${floorY}" x2="${width - 18}" y2="${floorY}" stroke="#d7ddd2"/>
+    <polygon points="${cx - r},${floorY} ${cx + r},${floorY} ${cx + 2 * r},${floorY - trapezoidHeight} ${cx - 2 * r},${floorY - trapezoidHeight}" fill="${fill}" stroke="${stroke}" stroke-width="2"/>
+  </svg>`;
+}
+
+function buildTabPreview(tab) {
+  const raw = tab.settings;
+  if (!raw.upperEquation?.trim() || !raw.lowerEquation?.trim()) {
+    return `<h3>${escapeHtml(tabTitle(tab, functionTabs.indexOf(tab)))}</h3><p>No function preview yet. Add upper and lower equations in this tab.</p>`;
+  }
+  if (String(raw.xMin).trim() === "" || String(raw.xMax).trim() === "") {
+    return `<h3>${escapeHtml(tabTitle(tab, functionTabs.indexOf(tab)))}</h3><p>Add an interval to preview the cross-sectional area.</p>`;
+  }
+
+  try {
+    const settings = tabSettingsAsNumbers(raw);
+    const orientation = settings.orientation ?? settings.upperOrientation ?? "y";
+    const variable = orientation === "x" ? "y" : "x";
+    const upperExpression = adaptExpressionVariable(buildMathExpression(raw.upperEquation, "upper"), orientation);
+    const lowerExpression = adaptExpressionVariable(buildMathExpression(raw.lowerEquation, "lower"), orientation);
+    const midpoint = (settings.xMin + settings.xMax) / 2;
+    const upper = upperExpression.evaluate(midpoint);
+    const lower = lowerExpression.evaluate(midpoint);
+    if (!upper.ok || !lower.ok) throw new Error(upper.ok ? lower.reason : upper.reason);
+    const distance = upper.value - lower.value;
+    const area = modelAreaForDistance(Math.max(distance, 0), settings);
+    return `
+      <h3>${escapeHtml(tabTitle(tab, functionTabs.indexOf(tab)))}</h3>
+      <p>${escapeHtml(shapeDescription(settings.crossSectionShape, settings))}</p>
+      <p class="preview-math">\\(${areaFormulaTex(settings, variable)}\\)</p>
+      <p>At ${variable} = ${formatNumber(midpoint)}, b(${variable}) = ${formatNumber(distance)} and A(${variable}) ≈ ${formatNumber(area, 6)} sq in.</p>
+      ${previewSectionSvg(settings.crossSectionShape, distance, settings)}
+    `;
+  } catch (error) {
+    return `<h3>${escapeHtml(tabTitle(tab, functionTabs.indexOf(tab)))}</h3><p>${escapeHtml(error.message || "Preview unavailable for this tab.")}</p>`;
+  }
+}
+
+function positionTabPreview(target) {
+  const rect = target.getBoundingClientRect();
+  const preview = els.tabPreview;
+  const left = Math.min(window.innerWidth - preview.offsetWidth - 18, Math.max(18, rect.left));
+  const top = rect.bottom + 10;
+  preview.style.left = `${left}px`;
+  preview.style.top = `${top}px`;
+}
+
+function showTabPreview(tab, target) {
+  saveActiveTabSettings();
+  els.tabPreview.innerHTML = buildTabPreview(tab);
+  els.tabPreview.classList.remove("hidden");
+  positionTabPreview(target);
+  if (window.MathJax?.typesetPromise) {
+    window.MathJax.typesetPromise([els.tabPreview]).catch(() => {});
+  }
+}
+
+function hideTabPreview() {
+  els.tabPreview.classList.add("hidden");
+}
+
+function toggleEquationOrientation() {
+  equationOrientation = equationOrientation === "y" ? "x" : "y";
+  graphViewport = null;
+  graphBaseViewport = null;
+  previousGraphKey = "";
+  render();
 }
 
 function exactVolumeWorkEntries(state) {
+  const casEntries = algebriteExactVolumeEntries(state);
+  if (casEntries) return casEntries;
+  if (state.sweepVariable !== "x") {
+    return [
+      { tex: `b(y) = ${state.upperExpression.toTex()} - \\left(${state.lowerExpression.toTex()}\\right)` },
+      { tex: `V = \\int_{${formatNumber(state.settings.xMin)}}^{${formatNumber(state.settings.xMax)}} A(y)\\,dy` },
+      { type: "note", text: "Exact symbolic work for x = f(y) is shown as setup only in this version." }
+    ];
+  }
+
   const s = state.settings;
   const b = symSimplify(sym("-", { left: state.upperExpression.toSym(), right: state.lowerExpression.toSym() }));
   const usesSquare = s.crossSectionShape !== "RECTANGLE";
@@ -1075,12 +1479,13 @@ function appendText(parent, text, attrs) {
   return node;
 }
 
-function sampleCurve(expression, xMin, xMax, count) {
+function sampleCurve(expression, xMin, xMax, count, orientation = "y") {
   const points = [];
   for (let i = 0; i < count; i += 1) {
-    const x = xMin + (i / (count - 1)) * (xMax - xMin);
-    const result = expression.evaluate(x);
-    points.push(result.ok ? { x, y: result.value } : null);
+    const sweep = xMin + (i / (count - 1)) * (xMax - xMin);
+    const result = expression.evaluate(sweep);
+    if (!result.ok) points.push(null);
+    else points.push(orientation === "x" ? { x: result.value, y: sweep } : { x: sweep, y: result.value });
   }
   return points;
 }
@@ -1104,6 +1509,8 @@ function getGraphKey(state) {
   return [
     s.upperEquation,
     s.lowerEquation,
+    s.upperOrientation,
+    s.lowerOrientation,
     s.xMin,
     s.xMax,
     s.sliceCount,
@@ -1118,22 +1525,34 @@ function computeGraphBaseViewport(state) {
   const minX = s.xMin - padX;
   const maxX = s.xMax + padX;
   const denseCount = Math.max(420, s.sliceCount * 8);
-  const upperCurve = sampleCurve(state.upperExpression, minX, maxX, denseCount);
-  const lowerCurve = sampleCurve(state.lowerExpression, minX, maxX, denseCount);
+  const sweepMin = state.settings.xMin - Math.max((state.settings.xMax - state.settings.xMin) * 0.14, 0.5);
+  const sweepMax = state.settings.xMax + Math.max((state.settings.xMax - state.settings.xMin) * 0.14, 0.5);
+  const upperCurve = sampleCurve(state.upperExpression, sweepMin, sweepMax, denseCount, state.settings.upperOrientation);
+  const lowerCurve = sampleCurve(state.lowerExpression, sweepMin, sweepMax, denseCount, state.settings.lowerOrientation);
   const yValues = [
-    ...usable.flatMap((p) => [p.upperY, p.lowerY, p.midY]),
+    ...usable.flatMap((p) => [p.upperPoint.y, p.lowerPoint.y, p.graphY]),
     ...upperCurve.filter(Boolean).map((p) => p.y),
     ...lowerCurve.filter(Boolean).map((p) => p.y),
     0
   ].filter((v) => Number.isFinite(v) && Math.abs(v) <= FORMULA_MAX_ABS_Y);
+  const xValues = [
+    ...usable.flatMap((p) => [p.upperPoint.x, p.lowerPoint.x, p.graphX]),
+    ...upperCurve.filter(Boolean).map((p) => p.x),
+    ...lowerCurve.filter(Boolean).map((p) => p.x),
+    0
+  ].filter((v) => Number.isFinite(v) && Math.abs(v) <= FORMULA_MAX_ABS_Y);
+  const candidateMinX = Math.min(...xValues, state.settings.xMin);
+  const candidateMaxX = Math.max(...xValues, state.settings.xMax);
   let minY = Math.min(...yValues, 0);
   let maxY = Math.max(...yValues, 0);
   const padY = Math.max((maxY - minY) * 0.18, 0.75);
   minY -= padY;
   maxY += padY;
+  const finalMinX = state.settings.upperOrientation === "x" ? candidateMinX - Math.max((candidateMaxX - candidateMinX) * 0.14, 0.5) : minX;
+  const finalMaxX = state.settings.upperOrientation === "x" ? candidateMaxX + Math.max((candidateMaxX - candidateMinX) * 0.14, 0.5) : maxX;
   const rect = els.regionSvg.getBoundingClientRect();
   const plot = graphPlotRect(rect.width || 900, rect.height || 500);
-  return equalizeGraphViewport({ minX, maxX, minY, maxY }, plot);
+  return equalizeGraphViewport({ minX: finalMinX, maxX: finalMaxX, minY, maxY }, plot);
 }
 
 function graphPlotRect(width, height) {
@@ -1240,8 +1659,9 @@ function drawRegion(state) {
   const minX = graphViewport.minX;
   const maxX = graphViewport.maxX;
   const denseCount = Math.max(420, s.sliceCount * 8);
-  const upperCurve = sampleCurve(state.upperExpression, minX, maxX, denseCount);
-  const lowerCurve = sampleCurve(state.lowerExpression, minX, maxX, denseCount);
+  const sweepPad = Math.max((s.xMax - s.xMin) * 0.14, 0.5);
+  const upperCurve = sampleCurve(state.upperExpression, s.xMin - sweepPad, s.xMax + sweepPad, denseCount, s.upperOrientation);
+  const lowerCurve = sampleCurve(state.lowerExpression, s.xMin - sweepPad, s.xMax + sweepPad, denseCount, s.lowerOrientation);
   const minY = graphViewport.minY;
   const maxY = graphViewport.maxY;
 
@@ -1294,18 +1714,20 @@ function drawRegion(state) {
   svg.append(svgEl("line", { x1: sx(0), y1: plot.top, x2: sx(0), y2: plot.bottom, stroke: "#4b5563", "stroke-width": "1.8" }));
 
   const plotLayer = svgEl("g", { "clip-path": `url(#${clipId})` });
-  const upper = usable.map((p) => `${sx(p.x)},${sy(p.upperY)}`).join(" ");
-  const lower = usable.slice().reverse().map((p) => `${sx(p.x)},${sy(p.lowerY)}`).join(" ");
+  const upper = usable.map((p) => `${sx(p.upperPoint.x)},${sy(p.upperPoint.y)}`).join(" ");
+  const lower = usable.slice().reverse().map((p) => `${sx(p.lowerPoint.x)},${sy(p.lowerPoint.y)}`).join(" ");
   plotLayer.append(svgEl("polygon", { points: `${upper} ${lower}`, fill: "rgba(47, 95, 159, 0.16)", stroke: "none" }));
   plotLayer.append(svgEl("path", { d: pathFromPoints(upperCurve, sx, sy), fill: "none", stroke: "#c74440", "stroke-width": "3.4", "stroke-linecap": "round", "stroke-linejoin": "round" }));
   plotLayer.append(svgEl("path", { d: pathFromPoints(lowerCurve, sx, sy), fill: "none", stroke: "#2d70b3", "stroke-width": "3.4", "stroke-linecap": "round", "stroke-linejoin": "round" }));
 
   for (const p of usable) {
-    if (p.x < minX || p.x > maxX) continue;
-    const x = sx(p.x);
-    plotLayer.append(svgEl("line", { x1: x, y1: sy(p.lowerY), x2: x, y2: sy(p.upperY), stroke: "#111827", "stroke-width": s.alternateSlices ? "2.2" : "1", opacity: s.alternateSlices ? "0.62" : "0.28" }));
+    const x1 = sx(p.lowerPoint.x);
+    const y1 = sy(p.lowerPoint.y);
+    const x2 = sx(p.upperPoint.x);
+    const y2 = sy(p.upperPoint.y);
+    plotLayer.append(svgEl("line", { x1, y1, x2, y2, stroke: "#111827", "stroke-width": s.alternateSlices ? "2.2" : "1", opacity: s.alternateSlices ? "0.62" : "0.28" }));
     if (Math.abs(p.distance) <= ZERO_SIZE_TOLERANCE) {
-      plotLayer.append(svgEl("circle", { cx: x, cy: sy(p.midY), r: 3, fill: "#111827" }));
+      plotLayer.append(svgEl("circle", { cx: sx(p.graphX), cy: sy(p.graphY), r: 3, fill: "#111827" }));
     }
   }
   svg.append(plotLayer);
@@ -1313,9 +1735,9 @@ function drawRegion(state) {
   const legend = svgEl("g", { transform: `translate(${plot.left + 12}, ${plot.top + 14})` });
   legend.append(svgEl("rect", { x: 0, y: 0, width: 250, height: 72, rx: 6, fill: "rgba(255,255,255,0.88)", stroke: "#d8dce0" }));
   legend.append(svgEl("circle", { cx: 15, cy: 20, r: 5, fill: "#c74440" }));
-  appendText(legend, `f(x) = ${state.normalizedUpper}`, { x: 28, y: 24, fill: "#222", "font-size": "12", "font-family": "Inter, sans-serif", "font-weight": "700" });
+  appendText(legend, `${s.upperOrientation} = ${state.normalizedUpper}`, { x: 28, y: 24, fill: "#222", "font-size": "12", "font-family": "Inter, sans-serif", "font-weight": "700" });
   legend.append(svgEl("circle", { cx: 15, cy: 44, r: 5, fill: "#2d70b3" }));
-  appendText(legend, `g(x) = ${state.normalizedLower}`, { x: 28, y: 48, fill: "#222", "font-size": "12", "font-family": "Inter, sans-serif", "font-weight": "700" });
+  appendText(legend, `${s.lowerOrientation} = ${state.normalizedLower}`, { x: 28, y: 48, fill: "#222", "font-size": "12", "font-family": "Inter, sans-serif", "font-weight": "700" });
   legend.append(svgEl("rect", { x: 11, y: 58, width: 8, height: 8, fill: "rgba(47, 95, 159, 0.22)", stroke: "#111827", "stroke-width": "0.8" }));
   appendText(legend, "sampled cross sections", { x: 28, y: 67, fill: "#4b5563", "font-size": "11", "font-family": "Inter, sans-serif" });
   svg.append(legend);
@@ -1374,6 +1796,49 @@ function computeSolidBounds(points) {
 }
 
 function sectionPoints(sample, settings, segments = 28) {
+  if (settings.upperOrientation === "x") {
+    const midX = sample.modelX;
+    const y = sample.modelMidY;
+    const b = Math.max(sample.modelDistance, 0);
+    const r = b / 2;
+    if (Math.abs(b) <= ZERO_SIZE_TOLERANCE) return [[midX, y, 0]];
+
+    if (settings.crossSectionShape === "SEMICIRCLE") {
+      const pts = [];
+      for (let i = 0; i <= segments; i += 1) {
+        const angle = Math.PI - (Math.PI * i / segments);
+        pts.push([midX + Math.cos(angle) * r, y, Math.sin(angle) * r]);
+      }
+      pts.push([midX - r, y, 0]);
+      return pts;
+    }
+    if (settings.crossSectionShape === "CIRCLE") {
+      const pts = [];
+      for (let i = 0; i < segments; i += 1) {
+        const angle = 2 * Math.PI * i / segments;
+        pts.push([midX + Math.cos(angle) * r, y, r + Math.sin(angle) * r]);
+      }
+      return pts;
+    }
+    if (settings.crossSectionShape === "RECTANGLE") {
+      return [
+        [midX - r, y, 0],
+        [midX + r, y, 0],
+        [midX + r, y, settings.rectangleWidth],
+        [midX - r, y, settings.rectangleWidth]
+      ];
+    }
+    const topHalfBase = r;
+    const bottomHalfBase = b;
+    const h = settings.trapezoidK * b;
+    return [
+      [midX - topHalfBase, y, 0],
+      [midX + topHalfBase, y, 0],
+      [midX + bottomHalfBase, y, h],
+      [midX - bottomHalfBase, y, h]
+    ];
+  }
+
   const x = sample.modelX;
   const midY = sample.modelMidY;
   const b = Math.max(sample.modelDistance, 0);
@@ -1430,17 +1895,7 @@ function drawSolid(state) {
 
   const sections = state.samples.map((p) => sectionPoints(p, state.settings));
   const allPoints = sections.flat();
-  const baseBounds = computeSolidBounds(allPoints);
-  const axisPad = baseBounds.span * 0.68;
-  const bounds = computeSolidBounds([
-    ...allPoints,
-    [-axisPad, 0, 0],
-    [axisPad, 0, 0],
-    [0, -axisPad, 0],
-    [0, axisPad, 0],
-    [0, 0, -axisPad],
-    [0, 0, axisPad]
-  ]);
+  const bounds = computeSolidBounds(allPoints);
 
   ctx.fillStyle = "#fbfcfa";
   ctx.fillRect(0, 0, width, height);
@@ -1473,14 +1928,13 @@ function drawSolid(state) {
     ctx.stroke();
   }
 
-  const axisLength = Math.max(baseBounds.span * 0.62, 0.8);
-  drawAxis(ctx, bounds, width, height, [-axisLength, 0, 0], [axisLength, 0, 0], "#c74440", "X");
-  drawAxis(ctx, bounds, width, height, [0, -axisLength, 0], [0, axisLength, 0], "#2d70b3", "Y");
-  drawAxis(ctx, bounds, width, height, [0, 0, -axisLength], [0, 0, axisLength], "#388c46", "Z");
+  drawInfiniteAxis(ctx, bounds, width, height, [0, 0, 0], [1, 0, 0], "#c74440", "X");
+  drawInfiniteAxis(ctx, bounds, width, height, [0, 0, 0], [0, 1, 0], "#2d70b3", "Y");
+  drawInfiniteAxis(ctx, bounds, width, height, [0, 0, 0], [0, 0, 1], "#388c46", "Z");
 
   if (!state.settings.alternateSlices && sections.length > 1) {
-    ctx.fillStyle = "rgba(39, 107, 93, 0.15)";
-    ctx.strokeStyle = "rgba(39, 107, 93, 0.34)";
+    ctx.fillStyle = "rgba(2, 132, 199, 0.13)";
+    ctx.strokeStyle = "rgba(2, 132, 199, 0.3)";
     for (let i = 1; i < sections.length; i += 1) {
       const a = sections[i - 1];
       const b = sections[i];
@@ -1545,9 +1999,79 @@ function drawAxis(ctx, bounds, width, height, start, end, color, label) {
   ctx.restore();
 }
 
+function drawInfiniteAxis(ctx, bounds, width, height, origin, direction, color, label) {
+  const a = project(origin, width, height, bounds);
+  const b = project([
+    origin[0] + direction[0],
+    origin[1] + direction[1],
+    origin[2] + direction[2]
+  ], width, height, bounds);
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const length = Math.hypot(dx, dy);
+  if (length < 1e-6) return;
+
+  const ux = dx / length;
+  const uy = dy / length;
+  const intersections = [];
+  const addIfInside = (t) => {
+    const x = a[0] + ux * t;
+    const y = a[1] + uy * t;
+    if (x >= -1 && x <= width + 1 && y >= -1 && y <= height + 1) intersections.push([x, y, t]);
+  };
+
+  if (Math.abs(ux) > 1e-9) {
+    addIfInside((0 - a[0]) / ux);
+    addIfInside((width - a[0]) / ux);
+  }
+  if (Math.abs(uy) > 1e-9) {
+    addIfInside((0 - a[1]) / uy);
+    addIfInside((height - a[1]) / uy);
+  }
+
+  let start;
+  let end;
+  if (intersections.length >= 2) {
+    intersections.sort((p, q) => p[2] - q[2]);
+    start = intersections[0];
+    end = intersections[intersections.length - 1];
+  } else {
+    const reach = Math.hypot(width, height) * 2;
+    start = [a[0] - ux * reach, a[1] - uy * reach];
+    end = [a[0] + ux * reach, a[1] + uy * reach];
+  }
+
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 2.4;
+  ctx.globalAlpha = 0.9;
+  ctx.beginPath();
+  ctx.moveTo(start[0], start[1]);
+  ctx.lineTo(end[0], end[1]);
+  ctx.stroke();
+
+  const labelPoint = end;
+  const labelX = Math.min(width - 28, Math.max(28, labelPoint[0] - ux * 28));
+  const labelY = Math.min(height - 28, Math.max(32, labelPoint[1] - uy * 28));
+  ctx.font = "800 14px Inter, sans-serif";
+  ctx.fillText(label, labelX, labelY);
+  ctx.restore();
+}
+
 function render() {
+  if (!applyingTabSettings) saveActiveTabSettings();
   els.rectangleWidthRow.classList.toggle("hidden", els.crossSectionShape.value !== "RECTANGLE");
   els.trapezoidKRow.classList.toggle("hidden", els.crossSectionShape.value !== "TRAPEZOID");
+  const intervalVariable = equationOrientation === "x" ? "y" : "x";
+  els.orientationToggle.dataset.orientation = equationOrientation;
+  els.orientationToggle.textContent = equationOrientation === "x" ? "Mode: x = f(y)" : "Mode: y = f(x)";
+  els.upperEquationPrefix.textContent = `${equationOrientation} =`;
+  els.lowerEquationPrefix.textContent = `${equationOrientation} =`;
+  els.upperFunctionLabel.textContent = `Upper equation f(${intervalVariable})`;
+  els.lowerFunctionLabel.textContent = `Lower equation g(${intervalVariable})`;
+  els.minValueLabel.textContent = `Minimum ${intervalVariable}-value`;
+  els.maxValueLabel.textContent = `Maximum ${intervalVariable}-value`;
   els.upperEquation.classList.remove("input-error");
   els.lowerEquation.classList.remove("input-error");
   els.xMin.classList.remove("input-error");
@@ -1568,8 +2092,8 @@ function render() {
     lastState = null;
     if (error.field === "upper") els.upperEquation.classList.add("input-error");
     if (error.field === "lower") els.lowerEquation.classList.add("input-error");
-    if (error.message.includes("Minimum x-value")) els.xMin.classList.add("input-error");
-    if (error.message.includes("Maximum x-value")) els.xMax.classList.add("input-error");
+    if (error.message.includes("Minimum x-value") || error.message.includes("Minimum y-value")) els.xMin.classList.add("input-error");
+    if (error.message.includes("Maximum x-value") || error.message.includes("Maximum y-value")) els.xMax.classList.add("input-error");
     els.statusPill.textContent = "Input error";
     els.statusPill.classList.add("error");
     els.sampleSummary.textContent = "";
@@ -1580,6 +2104,7 @@ function render() {
     els.formulaOutput.innerHTML = `<div class="math-note">${escapeHtml(error.message)}</div><div class="math-note">${escapeHtml(error.examples || "Use formats like x^2, sqrt(x), sin(x), ln(x), |x|.")}</div>`;
     els.exactOutput.textContent = "No exact volume work can be shown until the input matches the FeatureScript constraints.";
   }
+  if (!applyingTabSettings) renderTabs();
 }
 
 function download(filename, content, type) {
@@ -1663,9 +2188,23 @@ function runAlgebraEngineTests() {
 
 window.runAlgebraEngineTests = runAlgebraEngineTests;
 
+function initializeTabs() {
+  functionTabs = [{
+    id: activeTabId,
+    settings: settingsFromDom()
+  }];
+  renderTabs();
+}
+
+initializeTabs();
+
 document.querySelectorAll("input, select").forEach((input) => {
-  input.addEventListener("input", render);
-  input.addEventListener("change", render);
+  input.addEventListener("input", () => {
+    render();
+  });
+  input.addEventListener("change", () => {
+    render();
+  });
 });
 window.addEventListener("resize", render);
 window.addEventListener("load", () => {
@@ -1680,6 +2219,8 @@ els.zoomIn.addEventListener("click", () => zoomGraph(0.72));
 els.zoomOut.addEventListener("click", () => zoomGraph(1.38));
 els.zoomReset.addEventListener("click", resetGraphZoom);
 els.solidHome.addEventListener("click", resetSolidView);
+els.addTabButton.addEventListener("click", addFunctionTab);
+els.orientationToggle.addEventListener("click", toggleEquationOrientation);
 els.regionSvg.addEventListener("wheel", (event) => {
   if (!lastState || !graphViewport) return;
   event.preventDefault();
