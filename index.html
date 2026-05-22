@@ -1,144 +1,68 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Cross-Section Function Solid</title>
-  <link rel="stylesheet" href="styles.css">
-  <script defer src="https://unpkg.com/mathjs/lib/browser/math.js"></script>
-  <script>
-    window.MathJax = {
-      tex: { inlineMath: [["\\(", "\\)"], ["$", "$"]] },
-      svg: { fontCache: "global" },
-      startup: { typeset: false }
-    };
-  </script>
-  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
-</head>
-<body>
-  <header class="app-header">
-    <div>
-      <h1>Cross-section function solid</h1>
-    </div>
-    <div class="status-pill" id="statusPill">Ready</div>
-  </header>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Robot Design Learning Hub</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- Global header shared by every route in the learning site. -->
+    <header class="site-header">
+      <a class="brand" href="#/overview" aria-label="Robot Design Learning Hub home">
+        <span class="brand-mark" aria-hidden="true">RD</span>
+        <span>Robot Design Hub</span>
+      </a>
 
-  <main class="workspace">
-    <aside class="controls" aria-label="Feature controls">
-      <section>
-        <h2>Equations</h2>
-        <label>
-          Upper equation f(x)
-          <input id="upperEquation" type="text" value="" spellcheck="false">
-        </label>
-        <label>
-          Lower equation g(x)
-          <input id="lowerEquation" type="text" value="" spellcheck="false">
-        </label>
-        <p class="hint">Supports 2x+1, y=2x+1, f=2x, f(x)=2x, x³, sqrt(x), cbrt(x), |x|, e^x, ln(x), log(x), log10(x), trig, inverse trig, and rational expressions.</p>
-      </section>
+      <button class="icon-button menu-button" type="button" aria-expanded="false" aria-controls="course-sidebar">
+        <span class="menu-lines" aria-hidden="true"></span>
+        <span class="visually-hidden">Open course navigation</span>
+      </button>
 
-      <section>
-        <h2>Cross Section</h2>
-        <label>
-          Cross-section shape
-          <select id="crossSectionShape">
-            <option value="SEMICIRCLE">Semicircle</option>
-            <option value="CIRCLE" selected>Circle</option>
-            <option value="RECTANGLE">Rectangle</option>
-            <option value="TRAPEZOID">Trapezoid</option>
-          </select>
-        </label>
-        <label id="rectangleWidthRow" class="conditional hidden">
-          Rectangle width
-          <div class="unit-row">
-            <input id="rectangleWidth" type="number" min="0.001" max="100000" step="0.1" value="0.5">
-            <span>in</span>
-          </div>
-        </label>
-        <label id="trapezoidKRow" class="conditional hidden">
-          Trapezoid k value
-          <input id="trapezoidK" type="number" min="0.000001" max="100000" step="0.1" value="1">
-        </label>
-      </section>
+      <nav class="top-nav" aria-label="Primary navigation">
+        <a href="#/overview">Overview</a>
+        <a href="#/lesson/workspace-prep">Start</a>
+        <a href="#/lesson/sketches-constraints">CAD Basics</a>
+        <a href="#/lesson/capstone-robot">Capstone</a>
+      </nav>
 
-      <section>
-        <h2>Interval And Slices</h2>
-        <div class="two-col">
-          <label>
-            Minimum x-value
-            <input id="xMin" type="number" min="-1000" max="1000" step="0.1" value="">
-          </label>
-          <label>
-            Maximum x-value
-            <input id="xMax" type="number" min="-1000" max="1000" step="0.1" value="">
-          </label>
-        </div>
-        <label>
-          Number of slices
-          <input id="sliceCount" type="number" min="2" max="250" step="1" value="100">
+      <div class="header-tools">
+        <label class="search-control">
+          <span class="visually-hidden">Search lessons</span>
+          <input id="lesson-search" type="search" placeholder="Search lessons" autocomplete="off" />
+          <kbd>Ctrl K</kbd>
         </label>
-        <label>
-          scaleFactor
-          <input id="scaleFactor" type="number" min="0.001" max="1000" step="0.1" value="1">
-        </label>
-        <label class="check-row">
-          <input id="alternateSlices" type="checkbox">
-          <span>Skip every other slice</span>
-        </label>
-      </section>
-
-      <section>
-        <h2>Exports</h2>
-        <div class="button-grid">
-          <button id="exportSvg" type="button">SVG graph</button>
-          <button id="exportCsv" type="button">CSV points</button>
-          <button id="exportJson" type="button">JSON settings</button>
-          <button id="exportPng" type="button">PNG image</button>
-        </div>
-      </section>
-    </aside>
-
-    <section class="visuals">
-      <div class="panel graph-panel">
-        <div class="panel-title">
-          <h2>2D Region</h2>
-          <div class="graph-title-tools">
-            <span id="sampleSummary"></span>
-            <div class="zoom-controls" aria-label="2D graph zoom controls">
-              <button id="zoomOut" type="button" aria-label="Zoom out">-</button>
-              <button id="zoomIn" type="button" aria-label="Zoom in">+</button>
-              <button id="zoomReset" type="button" aria-label="Reset graph zoom">Reset</button>
-            </div>
-          </div>
-        </div>
-        <svg id="regionSvg" role="img" aria-label="2D function region"></svg>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch color theme">Auto</button>
       </div>
+    </header>
 
-      <div class="panel solid-panel">
-        <div class="panel-title">
-          <h2>Cross Sections And Solid</h2>
-          <div class="graph-title-tools">
-            <span id="shapeSummary"></span>
-            <button id="solidHome" class="panel-tool-button" type="button" aria-label="Reset 3D solid view">Home</button>
-          </div>
-        </div>
-        <canvas id="solidCanvas" width="1100" height="620" aria-label="3D solid approximation"></canvas>
-      </div>
+    <div class="mobile-scrim" hidden></div>
 
-      <div class="panel output-panel">
-        <div>
-          <h2>Volume Integral Setup</h2>
-          <div id="formulaOutput" class="formula"></div>
+    <main class="page-shell">
+      <!-- Sidebar is rendered by JavaScript from the curriculum data. -->
+      <aside id="course-sidebar" class="course-sidebar" aria-label="Course navigation">
+        <div class="sidebar-header">
+          <p class="eyebrow">Curriculum</p>
+          <button class="icon-button close-button" type="button">
+            <span aria-hidden="true">x</span>
+            <span class="visually-hidden">Close course navigation</span>
+          </button>
         </div>
-        <div>
-          <h2>Exact Volume Work</h2>
-          <div id="exactOutput" class="formula"></div>
-        </div>
-      </div>
-    </section>
-  </main>
+        <nav id="lesson-tree" class="lesson-tree"></nav>
+      </aside>
 
-  <script src="app.js?v=algebra-engine"></script>
-</body>
+      <!-- Dedicated route content is rendered here. -->
+      <article id="app" class="content" tabindex="-1"></article>
+
+      <!-- Right rail updates per lesson with headings from the current page. -->
+      <aside id="page-toc" class="page-toc" aria-label="On this page"></aside>
+    </main>
+
+    <footer class="site-footer">
+      <p>Robot Design Hub is an original beginner CAD and FRC design curriculum site.</p>
+      <p>It uses original instructional content and CSS-created placeholders only.</p>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
 </html>
